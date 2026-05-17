@@ -2196,18 +2196,19 @@ func P1AffinesMult(pointsIf interface{}, scalarsIf interface{}, nbits int) *P1 {
 		return &ret
 	}
 
-	if npoints < 32 {
+	if npoints < 32 || npoints < numThreads {
 		if numThreads > npoints {
 			numThreads = npoints
 		}
 
+		acc := make([]P1, numThreads)
+
 		curItem := uint32(0)
-		msgs := make(chan P1, numThreads)
+		var wg sync.WaitGroup
+		wg.Add(numThreads)
 
 		for tid := 0; tid < numThreads; tid++ {
-			go func() {
-				var acc P1
-
+			go func(acc *P1) {
 				for {
 					workItem := int(atomic.AddUint32(&curItem, 1) - 1)
 					if workItem >= npoints {
@@ -2246,14 +2247,15 @@ func P1AffinesMult(pointsIf interface{}, scalarsIf interface{}, nbits int) *P1 {
 						scalar, C.size_t(nbits))
 				}
 
-				msgs <- acc
-			}()
+				wg.Done()
+			}(&acc[tid])
 		}
 
-		ret := <-msgs
+		wg.Wait()
+
+		ret := acc[0]
 		for tid := 1; tid < numThreads; tid++ {
-			point := <-msgs
-			C.blst_p1_add_or_double(&ret.cgo, &ret.cgo, &point.cgo)
+			C.blst_p1_add_or_double(&ret.cgo, &ret.cgo, &acc[tid].cgo)
 		}
 
 		for i := range scalars {
@@ -3009,18 +3011,19 @@ func P2AffinesMult(pointsIf interface{}, scalarsIf interface{}, nbits int) *P2 {
 		return &ret
 	}
 
-	if npoints < 32 {
+	if npoints < 32 || npoints < numThreads {
 		if numThreads > npoints {
 			numThreads = npoints
 		}
 
+		acc := make([]P2, numThreads)
+
 		curItem := uint32(0)
-		msgs := make(chan P2, numThreads)
+		var wg sync.WaitGroup
+		wg.Add(numThreads)
 
 		for tid := 0; tid < numThreads; tid++ {
-			go func() {
-				var acc P2
-
+			go func(acc *P2) {
 				for {
 					workItem := int(atomic.AddUint32(&curItem, 1) - 1)
 					if workItem >= npoints {
@@ -3059,14 +3062,15 @@ func P2AffinesMult(pointsIf interface{}, scalarsIf interface{}, nbits int) *P2 {
 						scalar, C.size_t(nbits))
 				}
 
-				msgs <- acc
-			}()
+				wg.Done()
+			}(&acc[tid])
 		}
 
-		ret := <-msgs
+		wg.Wait()
+
+		ret := acc[0]
 		for tid := 1; tid < numThreads; tid++ {
-			point := <-msgs
-			C.blst_p2_add_or_double(&ret.cgo, &ret.cgo, &point.cgo)
+			C.blst_p2_add_or_double(&ret.cgo, &ret.cgo, &acc[tid].cgo)
 		}
 
 		for i := range scalars {
@@ -3601,15 +3605,18 @@ func breakdown(nbits, window, ncpus int) (nx int, ny int, wnd int) {
 				wnd = window
 			}
 		}
-	} else {
+	} else if window > 3 {
 		nx = 2
 		wnd = window - 2
-		for (nbits/wnd+1)*nx < ncpus {
+		for wnd > 1 && (nbits/wnd+1)*nx < ncpus {
 			nx += 1
 			wnd = window - bits.Len(3*uint(nx)/2)
 		}
 		nx -= 1
 		wnd = window - bits.Len(3*uint(nx)/2)
+	} else {
+		nx = 1
+		wnd = window
 	}
 	ny = nbits/wnd + 1
 	wnd = nbits/ny + 1
