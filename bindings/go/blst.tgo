@@ -24,7 +24,7 @@ package blst
 // }
 // __attribute__((constructor)) static void blst_cgo_init()
 // {   blst_fp temp = { 0 };
-//     struct sigaction act = { handler }, oact;
+//     struct sigaction act = { .sa_handler = handler }, oact;
 //     sigaction(SIGILL, &act, &oact);
 //     blst_fp_sqr(&temp, &temp);
 //     sigaction(SIGILL, &oact, NULL);
